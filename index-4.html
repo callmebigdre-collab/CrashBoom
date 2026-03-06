@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Boom & Crash · Spike Predictor</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=JetBrains+Mono:wght@300;400;700&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#020408;--bg2:#050c14;--bg3:#081020;
+  --b1:#0d2040;--b2:#112840;
+  --boom:#00fff7;--crash:#ff2d6b;--bull:#00e676;--bear:#ff1744;
+  --warn:#ffab00;--spike:#fff176;--txt:#8ab4d4;--dim:#0a1828;--muted:#1a3050;
+}
+*{-webkit-tap-highlight-color:transparent}
+html,body{background:var(--bg);color:var(--txt);font-family:'JetBrains Mono','Courier New',monospace;min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,255,247,.02) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,247,.02) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
+
+@keyframes spin  {to{transform:rotate(360deg)}}
+@keyframes pulse {0%,100%{opacity:1}50%{opacity:.12}}
+@keyframes fadein{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+@keyframes glow  {0%,100%{text-shadow:0 0 10px currentColor}50%{text-shadow:0 0 35px currentColor,0 0 70px currentColor}}
+@keyframes scan  {0%{transform:translateY(-100%)}100%{transform:translateY(100vh)}}
+@keyframes tkr   {0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+@keyframes fboom {0%{background:rgba(0,255,247,.14)}100%{background:transparent}}
+@keyframes fcrash{0%{background:rgba(255,45,107,.14)}100%{background:transparent}}
+@keyframes apulse{0%,100%{opacity:1}50%{opacity:.65}}
+
+.spin{animation:spin .8s linear infinite}
+.blink{animation:pulse 1.4s ease-in-out infinite}
+.glow{animation:glow 2s ease-in-out infinite}
+
+#scanline{position:fixed;top:0;left:0;right:0;height:2px;background:linear-gradient(transparent,rgba(0,255,247,.05),transparent);animation:scan 10s linear infinite;pointer-events:none;z-index:500}
+#spike-ov{position:fixed;inset:0;pointer-events:none;z-index:400;opacity:0}
+
+/* ── LOADING / ERROR ── */
+#loading,#err-screen{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;z-index:999;padding:20px;text-align:center}
+.lring{width:44px;height:44px;border-radius:50%;border:2px solid var(--muted);border-top-color:var(--boom)}
+.ltxt{font-size:12px;letter-spacing:4px;color:var(--boom)}
+.lsub{font-size:9px;color:var(--txt);max-width:260px;line-height:1.7}
+#lerr{font-size:9px;color:var(--crash);max-width:280px;line-height:1.8;min-height:14px}
+.lbar-wrap{width:220px;height:3px;background:var(--muted);border-radius:2px;overflow:hidden}
+.lbar-fill{height:100%;background:var(--boom);border-radius:2px;transition:width .5s}
+
+/* ── HEADER ──
+   Two rows: logo+conn on top, instrument tabs below.
+   Tabs are full-width-centered so they never overflow.       */
+#header{background:rgba(2,4,8,.97);border-bottom:1px solid var(--b1);position:sticky;top:0;z-index:100;backdrop-filter:blur(10px)}
+.hrow1{display:flex;align-items:center;justify-content:space-between;padding:0 14px;height:46px;gap:10px}
+.hrow2{display:flex;align-items:center;justify-content:center;padding:0 14px 9px;gap:6px;flex-wrap:wrap}
+.logo{font-family:'Orbitron',monospace;font-size:14px;font-weight:900;letter-spacing:3px;color:var(--boom);line-height:1.2;white-space:nowrap}
+.logo em{color:var(--crash);font-style:normal}
+.logo-sub{font-size:7px;letter-spacing:2px;color:var(--muted)}
+.conn-wrap{display:flex;align-items:center;gap:7px;flex-shrink:0}
+.cdot{width:7px;height:7px;border-radius:50%;background:var(--warn);flex-shrink:0}
+.clbl{font-size:9px;letter-spacing:2px;color:var(--warn);white-space:nowrap}
+.ts{font-size:8px;color:var(--muted);white-space:nowrap}
+.rbtn{font-family:'JetBrains Mono',monospace;font-size:9px;background:rgba(0,255,247,.06);border:1px solid rgba(0,255,247,.2);color:var(--boom);padding:4px 10px;border-radius:3px;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.rbtn:hover{background:rgba(0,255,247,.12)}
+/* instrument tabs */
+.itab{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:2px;padding:6px 18px;border-radius:4px;border:1px solid var(--muted);color:var(--muted);background:none;cursor:pointer;transition:all .2s;white-space:nowrap}
+.itab:hover{color:var(--txt);border-color:var(--txt)}
+.itab.boom.on{color:var(--boom);border-color:var(--boom);background:rgba(0,255,247,.07);box-shadow:0 0 12px rgba(0,255,247,.12)}
+.itab.crash.on{color:var(--crash);border-color:var(--crash);background:rgba(255,45,107,.07);box-shadow:0 0 12px rgba(255,45,107,.12)}
+
+/* ── TICKER ── */
+#ticker-wrap{background:var(--dim);border-bottom:1px solid var(--b1);height:22px;overflow:hidden}
+#ticker{display:flex;white-space:nowrap;animation:tkr 30s linear infinite;font-size:9px;line-height:22px;letter-spacing:0}
+.titem{padding:0 18px;color:var(--muted);border-right:1px solid var(--b1)}
+.titem span{font-weight:700}
+
+/* ── APP ── */
+#app{max-width:1380px;margin:0 auto;padding:12px;position:relative;z-index:1;display:none}
+
+/* ── ALERT BANNER ── */
+#alert{border-radius:6px;padding:11px 16px;margin-bottom:10px;display:none;align-items:center;gap:12px;border:1px solid;animation:apulse 1.2s ease-in-out infinite}
+#alert.boom{background:rgba(0,255,247,.07);border-color:var(--boom)}
+#alert.crash{background:rgba(255,45,107,.07);border-color:var(--crash)}
+.a-icon{font-size:22px;flex-shrink:0}
+.a-main{font-family:'Orbitron',monospace;font-size:11px;font-weight:700;letter-spacing:2px}
+.a-sub{font-size:8px;color:var(--txt);margin-top:3px;letter-spacing:1px;line-height:1.5}
+
+/* ── HERO ──
+   4-col on desktop → 2-col on tablet → 1-col on phone  */
+#hero{border:1px solid var(--b2);border-radius:8px;padding:16px 18px;margin-bottom:10px;background:linear-gradient(135deg,var(--bg2),var(--bg));transition:border-color .4s;position:relative;overflow:hidden}
+#hero::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--boom),transparent);opacity:.3}
+.hgrid{display:grid;grid-template-columns:140px 1fr 138px 138px;gap:14px;align-items:start}
+.sig-lbl{font-size:7px;letter-spacing:3px;color:var(--muted);margin-bottom:4px}
+#sig-dir{font-family:'Orbitron',monospace;font-size:52px;font-weight:900;line-height:1;transition:color .3s}
+.sig-meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;font-size:9px;color:var(--muted)}
+.sig-meta span{font-weight:700}
+#sig-price{font-family:'Orbitron',monospace;font-size:32px;font-weight:700;color:#e8f4ff;line-height:1;margin-bottom:10px;word-break:break-all}
+.lvl-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+.lvl-box{background:var(--bg3);border-radius:4px;padding:5px 6px;border:1px solid transparent;min-width:0}
+.lvl-lbl{font-size:6px;letter-spacing:1px;color:var(--muted);margin-bottom:2px;white-space:nowrap}
+.lvl-val{font-family:'Orbitron',monospace;font-size:10px;font-weight:600;word-break:break-all;line-height:1.3}
+.sbox{background:var(--bg3);border:1px solid var(--b2);border-radius:6px;padding:12px;text-align:center}
+.sbox-lbl{font-size:7px;letter-spacing:2px;color:var(--muted);margin-bottom:5px}
+.sbox-val{font-family:'Orbitron',monospace;font-size:34px;font-weight:700;line-height:1}
+.sbox-sub{font-size:8px;margin-top:4px;word-break:break-word}
+.sbar{height:4px;background:var(--muted);border-radius:2px;overflow:hidden;margin-top:7px}
+.sbar-fill{height:100%;border-radius:2px;transition:width .6s,background .5s}
+
+/* ── PREDICTOR ── */
+#pred{border:1px solid var(--b2);border-radius:8px;padding:13px 16px;margin-bottom:10px;background:var(--bg2)}
+.pred-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:6px}
+.pred-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+.pbox{background:var(--bg3);border-radius:5px;padding:9px 8px;border:1px solid var(--b1);text-align:center;transition:border-color .3s}
+.plbl{font-size:7px;letter-spacing:1px;color:var(--muted);margin-bottom:4px}
+.pval{font-family:'Orbitron',monospace;font-size:18px;font-weight:700}
+.psub{font-size:7px;margin-top:2px;color:var(--muted)}
+
+/* ── MAIN LAYOUT ── */
+.mgrid{display:grid;grid-template-columns:1fr 278px;gap:10px}
+.col-l,.col-r{display:flex;flex-direction:column;gap:9px}
+.card{background:var(--bg2);border:1px solid var(--b1);border-radius:6px;padding:13px}
+.chdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:6px}
+.clbl{font-size:8px;letter-spacing:3px;color:var(--muted)}
+
+/* ── PANEL TABS ── */
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:9px}
+.tab{font-family:'JetBrains Mono',monospace;font-size:9px;padding:5px 10px;border-radius:3px;border:1px solid transparent;color:var(--muted);background:none;cursor:pointer;transition:all .2s;white-space:nowrap}
+.tab:hover{color:var(--txt);border-color:var(--b2)}
+.tab.on{background:var(--bg3);border-color:var(--boom);color:var(--boom)}
+#chart{display:block;width:100%;height:190px}
+.panel{display:none;animation:fadein .2s ease}
+.panel.on{display:block}
+
+/* ── MISC ── */
+.srow{display:flex;align-items:center;gap:8px;padding:5px 9px;background:var(--bg3);border-radius:3px;margin-bottom:3px}
+.badge{font-size:7px;padding:2px 6px;border-radius:2px;font-weight:700;display:inline-block;margin-right:3px}
+.estep{padding:10px 12px;border-left:2px solid;border-radius:0 4px 4px 0;background:var(--bg3);margin-bottom:5px;font-size:9px;line-height:1.9;color:var(--txt)}
+.sentry{display:flex;justify-content:space-between;align-items:center;padding:5px 7px;border-bottom:1px solid var(--dim);animation:fadein .3s ease;gap:6px}
+.ai-txt{background:var(--bg3);border-radius:4px;border-left:2px solid var(--boom);padding:11px 13px;color:var(--txt);white-space:pre-wrap;line-height:1.9;font-size:10px}
+.irow{display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--bg3);border-radius:3px;margin-bottom:3px;gap:8px}
+.citem{display:flex;align-items:center;gap:9px;padding:6px 9px;background:var(--bg3);border-radius:3px;margin-bottom:3px;border-left:2px solid}
+.hrow{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--dim);font-size:9px;gap:6px}
+.mgbox{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:10px}
+.mbox{background:var(--bg3);border-radius:4px;padding:9px;text-align:center}
+.mlbl{font-size:7px;letter-spacing:2px;color:var(--muted);margin-bottom:3px}
+.mval{font-family:'Orbitron',monospace;font-size:16px;font-weight:700}
+.zrow{display:flex;align-items:center;gap:9px;padding:7px 10px;background:var(--bg3);border-radius:3px;margin-bottom:4px;border-left:2px solid;transition:opacity .3s}
+.gbtn{font-family:'JetBrains Mono',monospace;font-size:9px;background:rgba(0,255,247,.06);border:1px solid rgba(0,255,247,.22);color:var(--boom);padding:5px 12px;border-radius:3px;cursor:pointer;white-space:nowrap}
+.gbtn:hover{background:rgba(0,255,247,.12)}
+.gbtn:disabled{opacity:.4;cursor:not-allowed}
+.disc{background:rgba(255,45,107,.04);border:1px solid rgba(255,45,107,.1);border-radius:6px;padding:10px;font-size:8px;color:var(--muted);line-height:1.8}
+
+/* ── RESPONSIVE ── */
+@media(max-width:960px){
+  .mgrid{grid-template-columns:1fr}
+  /* Hero: signal+price on top row, two stat boxes on bottom row */
+  .hgrid{grid-template-columns:1fr 1fr;grid-template-rows:auto auto}
+  .pred-grid{grid-template-columns:repeat(3,1fr)}
+}
+@media(max-width:640px){
+  /* Hero: full single column stack */
+  .hgrid{grid-template-columns:1fr}
+  #sig-dir{font-size:42px}
+  #sig-price{font-size:26px}
+  .sbox-val{font-size:28px}
+  /* Levels: 2×2 on medium-small */
+  .lvl-grid{grid-template-columns:repeat(2,1fr)}
+  .pred-grid{grid-template-columns:repeat(2,1fr)}
+  .tabs{gap:3px}
+  .tab{font-size:8px;padding:4px 8px}
+  .itab{font-size:9px;padding:5px 12px}
+}
+@media(max-width:400px){
+  .pred-grid{grid-template-columns:1fr 1fr}
+  .pval{font-size:15px}
+  /* Levels stay 2×2, font smaller */
+  .lvl-val{font-size:9px}
+  .itab{font-size:8px;padding:5px 10px;letter-spacing:1px}
+}
+</style>
+</head>
+<body>
+<div id="scanline"></div>
+<div id="spike-ov"></div>
+
+<!-- LOADING -->
+<div id="loading">
+  <div class="lring spin"></div>
+  <div class="ltxt">BOOM &amp; CRASH</div>
+  <div class="lsub" id="lstatus">Connecting to Deriv…</div>
+  <div class="lbar-wrap"><div class="lbar-fill" id="lbar" style="width:0%"></div></div>
+  <div id="lerr"></div>
+</div>
+
+<!-- ERROR -->
+<div id="err-screen" style="display:none">
+  <div style="font-size:30px">⚠</div>
+  <div style="font-family:'Orbitron',monospace;font-size:12px;color:var(--crash);letter-spacing:2px">CONNECTION FAILED</div>
+  <div id="err-msg" style="font-size:9px;color:var(--muted);max-width:320px;line-height:1.9"></div>
+  <button class="rbtn" onclick="location.reload()" style="font-size:10px;padding:7px 18px;margin-top:4px">↻ RETRY</button>
+</div>
+
+<!-- HEADER -->
+<div id="header">
+  <!-- Row 1: logo left, connection right -->
+  <div class="hrow1">
+    <div>
+      <div class="logo">BOOM <em>&</em> CRASH</div>
+      <div class="logo-sub">SPIKE PREDICTOR · DERIV LIVE</div>
+    </div>
+    <div class="conn-wrap">
+      <div class="cdot blink" id="cdot"></div>
+      <div class="clbl" id="clbl">CONNECTING</div>
+      <div class="ts" id="ts"></div>
+      <button class="rbtn" onclick="manualRefresh()">↻</button>
+    </div>
+  </div>
+  <!-- Row 2: instrument tabs, centered, wrappable -->
+  <div class="hrow2">
+    <button class="itab boom on" id="tab-BOOM500"   onclick="switchInst('BOOM500',this)">BOOM 500</button>
+    <button class="itab crash"   id="tab-CRASH1000" onclick="switchInst('CRASH1000',this)">CRASH 1000</button>
+    <button class="itab crash"   id="tab-CRASH300"  onclick="switchInst('CRASH300',this)">CRASH 300</button>
+  </div>
+</div>
+
+<!-- TICKER -->
+<div id="ticker-wrap">
+  <div id="ticker">
+    <span class="titem">BOOM 500 <span id="tk-B5a" style="color:var(--boom)">—</span></span>
+    <span class="titem">CRASH 1000 <span id="tk-C10a" style="color:var(--crash)">—</span></span>
+    <span class="titem">CRASH 300 <span id="tk-C3a" style="color:var(--crash)">—</span></span>
+    <span class="titem">BOOM 500 <span id="tk-B5b" style="color:var(--boom)">—</span></span>
+    <span class="titem">CRASH 1000 <span id="tk-C10b" style="color:var(--crash)">—</span></span>
+    <span class="titem">CRASH 300 <span id="tk-C3b" style="color:var(--crash)">—</span></span>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+
+  <!-- ALERT BANNER -->
+  <div id="alert">
+    <div class="a-icon" id="a-icon">⚡</div>
+    <div>
+      <div class="a-main" id="a-main"></div>
+      <div class="a-sub"  id="a-sub"></div>
+    </div>
+  </div>
+
+  <!-- HERO -->
+  <div id="hero">
+    <div class="hgrid">
+      <div>
+        <div class="sig-lbl">PRE-SPIKE SIGNAL</div>
+        <div id="sig-dir" class="glow">—</div>
+        <div class="sig-meta">Score <span id="sig-score">—</span> &nbsp;Conf <span id="sig-conf">—</span></div>
+      </div>
+      <div>
+        <div class="sig-lbl">LIVE PRICE</div>
+        <div id="sig-price">—</div>
+        <div class="lvl-grid" id="lvl-grid"></div>
+      </div>
+      <div class="sbox">
+        <div class="sbox-lbl">TICKS SINCE SPIKE</div>
+        <div class="sbox-val" id="tick-count">0</div>
+        <div class="sbox-sub" id="tick-zone">—</div>
+        <div class="sbar"><div class="sbar-fill" id="tick-bar" style="width:0%"></div></div>
+      </div>
+      <div class="sbox">
+        <div class="sbox-lbl">SPIKE PROBABILITY</div>
+        <div class="sbox-val" id="spike-prob">—</div>
+        <div class="sbox-sub" id="spike-zone">—</div>
+        <div class="sbar"><div class="sbar-fill" id="prob-bar" style="width:0%"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PREDICTOR ENGINE -->
+  <div id="pred">
+    <div class="pred-hdr">
+      <span class="clbl">⚡ SPIKE PREDICTOR · 5-LAYER ENGINE</span>
+      <span id="pred-status" style="font-size:9px;color:var(--muted)">—</span>
+    </div>
+    <div class="pred-grid">
+      <div class="pbox" id="pb-geo">  <div class="plbl">GEOMETRIC</div>  <div class="pval" id="pv-geo">—</div>  <div class="psub">Tick cycle</div></div>
+      <div class="pbox" id="pb-vol">  <div class="plbl">VOL SQUEEZE</div><div class="pval" id="pv-vol">—</div>  <div class="psub">Pre-spike</div></div>
+      <div class="pbox" id="pb-drift"><div class="plbl">DRIFT</div>       <div class="pval" id="pv-drift">—</div><div class="psub">Direction</div></div>
+      <div class="pbox" id="pb-mean"> <div class="plbl">MEAN REV</div>    <div class="pval" id="pv-mean">—</div> <div class="psub">Z-stretch</div></div>
+      <div class="pbox" id="pb-comp"> <div class="plbl">COMPOSITE</div>   <div class="pval" id="pv-comp">—</div> <div class="psub">Combined</div></div>
+    </div>
+  </div>
+
+  <!-- MAIN GRID -->
+  <div class="mgrid">
+    <!-- LEFT COLUMN -->
+    <div class="col-l">
+      <div class="card">
+        <div class="chdr">
+          <span class="clbl">PRICE CHART · LAST 300 TICKS</span>
+          <span id="chart-sub" style="font-size:8px;color:var(--muted)">—</span>
+        </div>
+        <canvas id="chart"></canvas>
+        <div style="display:flex;gap:14px;margin-top:6px;font-size:8px;color:var(--muted)">
+          <span><span style="color:var(--spike)">⚡</span> Spike</span>
+          <span><span style="color:var(--bull)">▬</span> Bull</span>
+          <span><span style="color:var(--bear)">▬</span> Bear</span>
+          <span><span style="opacity:.4">- -</span> EMA50</span>
+          <span><span style="color:var(--warn);opacity:.5">- -</span> EMA20</span>
+        </div>
+      </div>
+
+      <!-- Panel tabs -->
+      <div class="tabs">
+        <button class="tab on" onclick="ptab('structure',this)">STRUCTURE</button>
+        <button class="tab"    onclick="ptab('spike',this)">SPIKE ANALYSIS</button>
+        <button class="tab"    onclick="ptab('entry',this)">POST-SPIKE</button>
+        <button class="tab"    onclick="ptab('momentum',this)">MOMENTUM</button>
+        <button class="tab"    onclick="ptab('conf',this)">CONFLUENCES</button>
+      </div>
+      <div class="card">
+        <div id="p-structure" class="panel on"></div>
+        <div id="p-spike"     class="panel"></div>
+        <div id="p-entry"     class="panel"></div>
+        <div id="p-momentum"  class="panel"></div>
+        <div id="p-conf"      class="panel"></div>
+      </div>
+
+      <!-- AI brief -->
+      <div class="card">
+        <div class="chdr">
+          <span class="clbl">◈ AI TRADE BRIEF</span>
+          <button class="gbtn" id="ai-btn" onclick="getAI()">⚡ GENERATE</button>
+        </div>
+        <div id="ai-out" style="font-size:9px;color:var(--muted);text-align:center;padding:10px">Press Generate for an AI trade brief</div>
+      </div>
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div class="col-r">
+      <div class="card" id="inst-card"></div>
+      <div class="card">
+        <div class="clbl" style="margin-bottom:9px">⚡ SPIKE LOG</div>
+        <div id="spike-log"><div style="font-size:9px;color:var(--muted);text-align:center;padding:8px">Awaiting spikes…</div></div>
+      </div>
+      <div class="card">
+        <div class="clbl" style="margin-bottom:9px">PRICE PATTERNS</div>
+        <div id="patterns">—</div>
+      </div>
+      <div class="card">
+        <div class="clbl" style="margin-bottom:9px">SIGNAL HISTORY</div>
+        <div id="sig-hist" style="font-size:9px;color:var(--muted);text-align:center;padding:8px">Signals appear here</div>
+      </div>
+      <div class="disc">⚠ <span style="color:var(--crash)">DISCLAIMER</span><br>Boom &amp; Crash are synthetic indices. Spikes are algorithmically generated. For educational use only. Not financial advice.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ════════════════════════════════
+   INSTRUMENT CONFIG
+════════════════════════════════ */
+const INST = {
+  BOOM500:   {name:'Boom 500',   type:'boom',  color:'#00fff7', avg:500,  thresh:0.35, desc:'~1 upward spike per 500 ticks'},
+  CRASH1000: {name:'Crash 1000', type:'crash', color:'#ff2d6b', avg:1000, thresh:0.35, desc:'~1 downward spike per 1000 ticks'},
+  CRASH300:  {name:'Crash 300',  type:'crash', color:'#ff6b35', avg:300,  thresh:0.35, desc:'~1 downward spike per 300 ticks'},
+}
+const TK = {BOOM500:['tk-B5a','tk-B5b'],CRASH1000:['tk-C10a','tk-C10b'],CRASH300:['tk-C3a','tk-C3b']}
+
+/* ════════════════════════════════
+   STATE
+   
+   KEY DESIGN DECISION:
+   snapshotData + snapshotSince are frozen at load time.
+   The signal is computed ONLY from snapshot data.
+   Every device loading in the same 5-min window gets
+   the exact same snapshot → identical signals always.
+   
+   'since' (live counter) is DISPLAY ONLY — it tracks
+   ticks since the last spike seen in real time.
+   It does NOT affect the signal computation.
+════════════════════════════════ */
+let cur           = 'BOOM500'
+let snapshotData  = {BOOM500:[],CRASH1000:[],CRASH300:[]}   // frozen at boot
+let snapshotSince = {BOOM500:0, CRASH1000:0, CRASH300:0}    // frozen at boot — used in signal
+let since         = {BOOM500:0, CRASH1000:0, CRASH300:0}    // live — display only
+let livePrice     = {BOOM500:null,CRASH1000:null,CRASH300:null}
+let spLog         = {BOOM500:[],CRASH1000:[],CRASH300:[]}
+let sigs          = {BOOM500:null,CRASH1000:null,CRASH300:null}
+let hist          = []
+let fails         = 0
+let busy          = false
+
+/* ════════════════════════════════
+   FETCH
+════════════════════════════════ */
+async function fetchHistory(sym) {
+  const r = await fetch(`/.netlify/functions/tick?symbol=${sym}&mode=history`)
+  if (!r.ok) throw new Error('HTTP '+r.status)
+  const d = await r.json()
+  if (d.error) throw new Error(d.error)
+  return d
+}
+async function fetchTick(sym) {
+  const r = await fetch(`/.netlify/functions/tick?symbol=${sym}&mode=latest`)
+  if (!r.ok) throw new Error('HTTP '+r.status)
+  const d = await r.json()
+  if (d.error) throw new Error(d.error)
+  return d
+}
+
+/* ════════════════════════════════
+   BOOT
+   Loads anchored history (same for all devices),
+   computes signals once, locks them.
+   Only the price display + spike log update live.
+════════════════════════════════ */
+async function boot() {
+  const keys = Object.keys(INST)
+  let ok = false
+
+  for (let i=0; i<keys.length; i++) {
+    const k = keys[i]
+    document.getElementById('lstatus').textContent = 'Loading '+INST[k].name+'…'
+    document.getElementById('lbar').style.width = ((i/keys.length)*85)+'%'
+
+    try {
+      const d = await fetchHistory(k)
+      if (d.ok && d.history?.length) {
+        const arr = []
+        let s = 0
+        for (const h of d.history) {
+          const price = parseFloat(h.price)
+          let isSpike = false
+          if (arr.length > 0) {
+            const prev = arr[arr.length-1].price
+            const pct  = Math.abs((price-prev)/prev)*100
+            if (pct >= INST[k].thresh) {
+              const dir = price>prev?'UP':'DOWN'
+              const ok2 = (INST[k].type==='boom'&&dir==='UP')||(INST[k].type==='crash'&&dir==='DOWN')
+              if (ok2) {
+                isSpike = true
+                s = 0
+                spLog[k].unshift({price:price.toFixed(5), t:new Date(h.time*1000).toLocaleTimeString(), dir, pct:pct.toFixed(2)})
+                spLog[k] = spLog[k].slice(0,20)
+              }
+            }
+          }
+          if (!isSpike) s++
+          arr.push({price, time:h.time*1000, isSpike})
+        }
+        snapshotData[k]  = arr
+        snapshotSince[k] = s        // FROZEN — the since-counter at snapshot time
+        since[k]         = s        // live counter starts same, then diverges for display only
+        livePrice[k]     = arr[arr.length-1].price
+        sigs[k]          = computeSig(k)  // computed from snapshot — never changes
+        ok = true
+        ;(TK[k]||[]).forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=arr[arr.length-1].price.toFixed(5)})
+      }
+    } catch(e) {
+      console.warn(k, e.message)
+      document.getElementById('lerr').textContent = k+': '+e.message
+    }
+  }
+
+  document.getElementById('lbar').style.width = '100%'
+
+  if (ok) {
+    fails = 0
+    setTimeout(()=>{
+      document.getElementById('loading').style.display = 'none'
+      document.getElementById('app').style.display = 'block'
+      setConn(true)
+      renderAll()
+    }, 350)
+  } else {
+    document.getElementById('loading').style.display = 'none'
+    document.getElementById('err-screen').style.display = 'flex'
+    document.getElementById('err-msg').textContent = 'Failed to load tick history from Deriv. Check Netlify function deployment.'
+  }
+}
+
+/* ════════════════════════════════
+   LIVE POLL
+   Updates: price display, ticker, since counter (display), spike log.
+   Does NOT recompute the signal — signal stays from snapshot.
+════════════════════════════════ */
+async function pollAll() {
+  if (busy) return; busy = true
+  let ok = false
+  for (const k of Object.keys(INST)) {
+    try {
+      const d = await fetchTick(k)
+      if (d.ok && d.price) {
+        const price = parseFloat(d.price)
+        const prev  = livePrice[k]
+        livePrice[k] = price
+        ok = true
+        if (prev !== null) {
+          const pct = Math.abs((price-prev)/prev)*100
+          if (pct >= INST[k].thresh) {
+            const dir = price>prev?'UP':'DOWN'
+            const v   = (INST[k].type==='boom'&&dir==='UP')||(INST[k].type==='crash'&&dir==='DOWN')
+            if (v) {
+              since[k] = 0
+              spLog[k].unshift({price:price.toFixed(5), t:new Date().toLocaleTimeString(), dir, pct:pct.toFixed(2)})
+              spLog[k] = spLog[k].slice(0,20)
+              if (k===cur) flashSpike(INST[k])
+            } else { since[k]++ }
+          } else { since[k]++ }
+        }
+        ;(TK[k]||[]).forEach(id=>{const el=document.getElementById(id);if(el)el.textContent=price.toFixed(5)})
+      }
+    } catch(e){console.warn(k,e.message)}
+  }
+  busy = false
+  if (ok) { fails=0; setConn(true); updateLive(); document.getElementById('ts').textContent=new Date().toLocaleTimeString() }
+  else { fails++; if(fails>=5) setConn(false) }
+}
+
+function manualRefresh(){ fails=0; pollAll() }
+
+/* Updates only the live-changing parts of the UI */
+function updateLive() {
+  const inst = INST[cur], sig = sigs[cur]
+  if (!sig) return
+
+  // Live price
+  if (livePrice[cur]!==null)
+    document.getElementById('sig-price').textContent = livePrice[cur].toFixed(5)
+
+  // Ticks since spike + spike probability
+  // NOTE: spikePredictor for DISPLAY uses live since[cur]
+  const sp = spikePredictorDisplay(cur)
+  const tc = document.getElementById('tick-count')
+  tc.textContent = since[cur]; tc.style.color = sp.zc
+  document.getElementById('tick-zone').textContent = 'Zone: '+sp.zone
+  document.getElementById('tick-zone').style.color = sp.zc
+  document.getElementById('tick-bar').style.width = Math.min(100,(since[cur]/inst.avg)*100)+'%'
+  document.getElementById('tick-bar').style.background = sp.zc
+  document.getElementById('spike-prob').textContent = sp.composite+'%'
+  document.getElementById('spike-prob').style.color = sp.zc
+  document.getElementById('spike-zone').textContent = sp.zone
+  document.getElementById('spike-zone').style.color = sp.zc
+  document.getElementById('prob-bar').style.width = sp.composite+'%'
+  document.getElementById('prob-bar').style.background = sp.zc
+
+  // Alert banner — uses live predictor so alert fires at the right live tick count
+  const banner = document.getElementById('alert')
+  if (sp.alert) {
+    banner.style.display = 'flex'
+    banner.className = inst.type==='boom'?'boom':'crash'
+    document.getElementById('a-icon').textContent = '⚡'
+    document.getElementById('a-main').textContent = inst.type==='boom'?'BOOM SPIKE INCOMING — PREPARE BUY':'CRASH SPIKE INCOMING — PREPARE SELL'
+    document.getElementById('a-main').style.color = inst.color
+    document.getElementById('a-sub').textContent  = sp.alertMsg
+  } else { banner.style.display='none' }
+
+  // Spike log
+  const log = spLog[cur]
+  document.getElementById('spike-log').innerHTML = log.length
+    ? log.slice(0,10).map((s,i)=>`<div class="sentry" style="opacity:${1-i*.08}"><span style="font-size:9px;color:var(--spike)">⚡ ${s.dir}</span><span style="font-size:9px;color:var(--txt)">${s.price}</span><span style="font-size:8px;color:var(--muted)">${s.t}</span></div>`).join('')
+    : '<div style="font-size:9px;color:var(--muted);text-align:center;padding:8px">No spikes yet</div>'
+
+  // Predictor display boxes
+  const preds = [
+    {id:'geo',   v:sp.geo+'%',       a:sp.geo>=70},
+    {id:'vol',   v:sp.volScore+'%',  a:sp.compressed},
+    {id:'drift', v:sp.driftScore+'%',a:sp.driftScore>=60},
+    {id:'mean',  v:sp.meanScore+'%', a:sp.meanScore>=40},
+    {id:'comp',  v:sp.composite+'%', a:sp.composite>=70},
+  ]
+  preds.forEach(p=>{
+    const box=document.getElementById('pb-'+p.id), val=document.getElementById('pv-'+p.id)
+    if(val){val.textContent=p.v; val.style.color=p.a?inst.color:'var(--muted)'}
+    if(box) box.style.borderColor=p.a?inst.color:'var(--b1)'
+  })
+  document.getElementById('pred-status').textContent = sp.zone+' · '+sp.composite+'%'
+  document.getElementById('pred-status').style.color  = sp.zc
+}
+
+function setConn(ok) {
+  document.getElementById('cdot').style.background = ok?'var(--bull)':'var(--warn)'
+  document.getElementById('clbl').textContent      = ok?'LIVE':'RECONNECTING'
+  document.getElementById('clbl').style.color      = ok?'var(--bull)':'var(--warn)'
+}
+
+/* ════════════════════════════════
+   MATH
+════════════════════════════════ */
+function ema(arr,p){const k=2/(p+1);let v=arr[0];for(let i=1;i<arr.length;i++)v=arr[i]*k+v*(1-k);return v}
+function stddev(arr){const m=arr.reduce((s,v)=>s+v,0)/arr.length;return Math.sqrt(arr.reduce((s,v)=>s+(v-m)**2,0)/arr.length)}
+function swings(prices,lb=10){const H=[],L=[];for(let i=lb;i<prices.length-lb;i++){const sl=prices.slice(i-lb,i+lb+1);if(prices[i]===Math.max(...sl))H.push({i,p:prices[i]});if(prices[i]===Math.min(...sl))L.push({i,p:prices[i]})}return{H,L}}
+function atr(prices,p=20){if(prices.length<p+1)return 0.0001;const r=[];for(let i=prices.length-p;i<prices.length;i++)r.push(Math.abs(prices[i]-prices[i-1]));return r.reduce((s,v)=>s+v,0)/p}
+
+/* ════════════════════════════════
+   SPIKE PREDICTOR — two versions:
+   
+   spikePredictorSignal(key):
+     Uses snapshotSince[key] — FROZEN at load time.
+     Every device gets the same result.
+     Used in computeSig() for BUY/SELL signal.
+   
+   spikePredictorDisplay(key):
+     Uses live since[key] counter.
+     Shows real-time probability as ticks accumulate.
+     Used only for the display boxes and alert banner.
+════════════════════════════════ */
+function _spikePred(key, sinceVal) {
+  const inst   = INST[key]
+  const arr    = snapshotData[key]
+  const avg    = inst.avg
+  const isBoom = inst.type==='boom'
+  if (arr.length < 60) return {geo:0,volScore:0,driftScore:0,meanScore:0,exhaustScore:0,composite:0,zone:'LOADING',zc:'#1a3050',alert:false,alertMsg:'',compressed:false,zScore:0,atrShort:0,atrLong:0}
+  const prices = arr.map(t=>t.price), n=prices.length
+
+  // L1: Geometric (tick cycle) — uses the passed sinceVal
+  const geo = Math.min(99, Math.round((1-Math.pow(1-1/avg, sinceVal))*100))
+
+  // L2: Vol compression — from snapshot
+  const atrS=atr(prices.slice(-10),10), atrL=atr(prices.slice(-50),50)
+  const vr=atrL>0?atrS/atrL:1
+  const volScore=Math.min(100,Math.round((1-Math.min(vr,1.5)/1.5)*100))
+  const compressed=vr<0.65
+
+  // L3: Drift — from snapshot
+  const w30=prices.slice(-30);let dt=0
+  for(let i=1;i<w30.length;i++) if((w30[i]-w30[i-1])*(isBoom?1:-1)>0) dt++
+  const driftScore=Math.round((dt/(w30.length-1))*100)
+
+  // L4: Mean reversion — from snapshot
+  const w100=prices.slice(-100), m100=w100.reduce((s,v)=>s+v,0)/w100.length, sd=stddev(w100)
+  const z=sd>0?(prices[n-1]-m100)/sd:0
+  const meanScore=Math.min(100,Math.round(Math.max(0,isBoom?-z:z)*33))
+
+  // L5: Exhaustion — from snapshot
+  let ex=0; for(let i=n-1;i>n-20&&i>0;i--){if((prices[i]-prices[i-1])*(isBoom?-1:1)>0)ex++;else break}
+  const exhaustScore=Math.min(100,ex*12)
+
+  const composite=Math.min(99,Math.round(geo*.30+volScore*.25+driftScore*.20+meanScore*.15+exhaustScore*.10))
+  const hc=[geo>=80,compressed,driftScore>=55,composite>=72].filter(Boolean).length
+  let zone,zc
+  if(composite>=80&&hc>=3){zone='🔥 FIRE';zc='#ff4500'}
+  else if(composite>=70&&hc>=2){zone='HOT';zc='#fff176'}
+  else if(composite>=55){zone='WARM';zc='#ffab00'}
+  else if(composite>=35){zone='BUILDING';zc='#00fff7'}
+  else{zone='EARLY';zc='#1a3050'}
+  const lh=[geo>=75,volScore>=60,driftScore>=60,meanScore>=40,exhaustScore>=36].filter(Boolean).length
+  const alert=composite>=72&&lh>=3
+  const alertMsg=alert?`Composite ${composite}% · ${lh}/5 layers · ${isBoom?'BUY before spike':'SELL before spike'}`:''
+  return{geo,volScore,driftScore,meanScore,exhaustScore,composite,zone,zc,alert,alertMsg,compressed,zScore:+z.toFixed(2),atrShort:+atrS.toFixed(6),atrLong:+atrL.toFixed(6)}
+}
+// Signal version — frozen since
+function spikePredictorSignal(key)  { return _spikePred(key, snapshotSince[key]) }
+// Display version — live since
+function spikePredictorDisplay(key) { return _spikePred(key, since[key]) }
+
+/* ════════════════════════════════
+   MARKET STRUCTURE
+════════════════════════════════ */
+function marketStructure(prices){
+  const{H,L}=swings(prices,10)
+  if(H.length<2||L.length<2)return{trend:'NEUTRAL',HH:false,HL:false,LH:false,LL:false,bos:false}
+  const lH=H.slice(-2),lL=L.slice(-2)
+  const HH=lH[1].p>lH[0].p,HL=lL[1].p>lL[0].p,LH=lH[1].p<lH[0].p,LL=lL[1].p<lL[0].p
+  const trend=(HH&&HL)?'BULLISH':(LH&&LL)?'BEARISH':'NEUTRAL'
+  const c=prices[prices.length-1]
+  const bos=trend==='BULLISH'?c>lH[0].p:trend==='BEARISH'?c<lL[0].p:false
+  return{trend,HH,HL,LH,LL,bos}
+}
+function momentum(prices){
+  const n=prices.length; if(n<60)return{roc:0,accel:0,overext:false,dev:0}
+  const r=((prices[n-1]-prices[n-50])/prices[n-50])*100
+  const r2=((prices[n-25]-prices[n-50])/prices[n-50])*100
+  const ev=ema(prices.slice(-60),50),dev=((prices[n-1]-ev)/ev)*100
+  return{roc:+r.toFixed(3),accel:+(r-r2).toFixed(3),overext:Math.abs(dev)>0.5,dev:+dev.toFixed(3)}
+}
+function postSpike(key){
+  const arr=snapshotData[key],log=spLog[key],inst=INST[key]
+  if(!log.length||arr.length<10)return null
+  const idx=arr.slice().reverse().findIndex(t=>t.isSpike)
+  if(idx<0)return null
+  const sp=arr[arr.length-1-idx].price,c=arr[arr.length-1].price
+  const ret=((c-sp)/sp)*100,isBoom=inst.type==='boom'
+  const good=isBoom?(ret<-0.03&&ret>-0.6):(ret>0.03&&ret<0.6)
+  const q=idx<40&&good?'PRIME':idx<80?'GOOD':idx<180?'FAIR':'STALE'
+  return{ago:idx,sp:+sp.toFixed(5),ret:+ret.toFixed(4),q,good}
+}
+
+/* ════════════════════════════════
+   SIGNAL ENGINE
+   Runs ENTIRELY on frozen snapshot data.
+   Same inputs every time → same output everywhere.
+════════════════════════════════ */
+function computeSig(key) {
+  const inst=INST[key], arr=snapshotData[key]
+  if(arr.length<100) return null
+  const prices=arr.map(t=>t.price)
+  const pred=spikePredictorSignal(key)   // uses snapshotSince — frozen
+  const ms=marketStructure(prices), mom=momentum(prices), ps=postSpike(key)
+  const at=atr(prices,20), c=prices[prices.length-1]
+  const e20v=ema(prices.slice(-100),20), e50v=ema(prices.slice(-200),50)
+  const isBoom=inst.type==='boom', spBull=isBoom
+  let score=0, confs=[]
+
+  // PRIMARY — spike predictor (frozen)
+  if(pred.composite>=80)     {score+=spBull?7:-7;  confs.push({t:`🔥 FIRE ZONE — ${pred.composite}% composite — SPIKE IMMINENT`,b:spBull})}
+  else if(pred.composite>=70){score+=spBull?5:-5;  confs.push({t:`⚡ HOT — ${pred.composite}% composite`,b:spBull})}
+  else if(pred.composite>=55){score+=spBull?3:-3;  confs.push({t:`WARM — ${pred.composite}%`,b:spBull})}
+  else if(pred.composite>=35){score+=spBull?1:-1;  confs.push({t:`BUILDING — ${pred.composite}%`,b:spBull})}
+  if(pred.compressed)         confs.push({t:`Vol compressed (ratio ${(pred.atrShort/pred.atrLong).toFixed(2)}) — pre-spike squeeze`,b:spBull})
+  if(pred.driftScore>=65)     confs.push({t:`Directional drift ${pred.driftScore}% toward spike`,b:spBull})
+  if(pred.meanScore>=50)      confs.push({t:`Mean reversion stretch (z=${pred.zScore})`,b:spBull})
+  if(pred.exhaustScore>=60)   confs.push({t:'Counter-move exhaustion detected',b:spBull})
+
+  // SECONDARY — post-spike entry
+  if(ps){
+    const psBull=inst.type==='crash'
+    if(ps.q==='PRIME') {score+=psBull?4:-4;   confs.push({t:`PRIME post-spike entry (${ps.ago} ticks, ${Math.abs(ps.ret).toFixed(3)}% retrace)`,b:psBull})}
+    else if(ps.q==='GOOD'){score+=psBull?2.5:-2.5; confs.push({t:`GOOD post-spike entry (${ps.ago} ticks)`,b:psBull})}
+  }
+
+  // TERTIARY — structure
+  if(ms.trend==='BULLISH')         {score+=1.5; confs.push({t:'Bullish structure (HH+HL)',b:true})}
+  if(ms.trend==='BEARISH')         {score-=1.5; confs.push({t:'Bearish structure (LH+LL)',b:false})}
+  if(ms.bos&&ms.trend==='BULLISH') {score+=1;   confs.push({t:'Bullish BOS confirmed',b:true})}
+  if(ms.bos&&ms.trend==='BEARISH') {score-=1;   confs.push({t:'Bearish BOS confirmed',b:false})}
+  if(c>e20v&&e20v>e50v)            {score+=0.5; confs.push({t:'EMA stack bullish',b:true})}
+  if(c<e20v&&e20v<e50v)            {score-=0.5; confs.push({t:'EMA stack bearish',b:false})}
+  if(mom.overext&&mom.roc>0)       confs.push({t:`Overextended UP (${mom.dev}%)`,b:null})
+  if(mom.overext&&mom.roc<0)       confs.push({t:`Overextended DOWN (${mom.dev}%)`,b:null})
+
+  const conf=Math.min(97,Math.round((Math.abs(score)/18)*100))
+  const dir=score>=5?'BUY':score<=-5?'SELL':'WAIT'
+  const dc=dir==='BUY'?'#00e676':dir==='SELL'?'#ff1744':'#ffab00'
+  const sl=dir==='BUY'?+(c-at*10).toFixed(5):+(c+at*10).toFixed(5)
+  const tp1=dir==='BUY'?+(c+at*12).toFixed(5):+(c-at*12).toFixed(5)
+  const tp2=dir==='BUY'?+(c+at*25).toFixed(5):+(c-at*25).toFixed(5)
+  const tp3=dir==='BUY'?+(c+at*42).toFixed(5):+(c-at*42).toFixed(5)
+  const rr=+((Math.abs(tp2-c))/(Math.abs(sl-c)||.0001)).toFixed(1)
+  return{dir,dc,score:+score.toFixed(1),conf,c,sl,tp1,tp2,tp3,rr,at:+at.toFixed(6),confs,ms,mom,pred,ps,e20:+e20v.toFixed(5),e50:+e50v.toFixed(5)}
+}
+
+/* ════════════════════════════════
+   SPIKE FLASH
+════════════════════════════════ */
+function flashSpike(inst){
+  const o=document.getElementById('spike-ov')
+  o.style.animation='none'; void o.offsetWidth
+  o.style.background=inst.type==='boom'?'rgba(0,255,247,.12)':'rgba(255,45,107,.12)'
+  o.style.opacity='1'
+  o.style.animation=inst.type==='boom'?'fboom 1s ease forwards':'fcrash 1s ease forwards'
+  setTimeout(()=>{o.style.opacity='0'},1000)
+}
+
+/* ════════════════════════════════
+   CHART
+════════════════════════════════ */
+function drawChart(){
+  const cv=document.getElementById('chart'); if(!cv) return
+  const arr=snapshotData[cur], inst=INST[cur]
+  if(arr.length<10) return
+  const dpr=window.devicePixelRatio||1, rect=cv.getBoundingClientRect()
+  if(rect.width<10) return
+  cv.width=rect.width*dpr; cv.height=rect.height*dpr
+  const ctx=cv.getContext('2d'); ctx.scale(dpr,dpr)
+  const W=rect.width,H=rect.height
+  const sl=arr.slice(-300),pr=sl.map(t=>t.price)
+  const mn=Math.min(...pr),mx=Math.max(...pr),rng=mx-mn||.001
+  const py=v=>H-12-((v-mn)/rng)*(H-24)
+  const px=i=>10+(i/(sl.length-1))*(W-20)
+  ctx.clearRect(0,0,W,H)
+  ctx.strokeStyle='rgba(255,255,255,.025)'; ctx.lineWidth=1
+  for(let i=0;i<=4;i++){const y=12+(i/4)*(H-24);ctx.beginPath();ctx.moveTo(10,y);ctx.lineTo(W-10,y);ctx.stroke()}
+  const ev50=[]; let e50=pr[0],k50=2/51; pr.forEach(p=>{e50=p*k50+e50*(1-k50);ev50.push(e50)})
+  ctx.beginPath();ctx.strokeStyle='rgba(255,255,255,.1)';ctx.lineWidth=1;ctx.setLineDash([3,5])
+  ev50.forEach((v,i)=>i===0?ctx.moveTo(px(i),py(v)):ctx.lineTo(px(i),py(v)));ctx.stroke()
+  const ev20=[]; let e20v=pr[0],k20=2/21; pr.forEach(p=>{e20v=p*k20+e20v*(1-k20);ev20.push(e20v)})
+  ctx.beginPath();ctx.strokeStyle='rgba(255,171,0,.2)';ctx.lineWidth=1;ctx.setLineDash([2,4])
+  ev20.forEach((v,i)=>i===0?ctx.moveTo(px(i),py(v)):ctx.lineTo(px(i),py(v)));ctx.stroke();ctx.setLineDash([])
+  let seg=0
+  for(let i=1;i<sl.length;i++){
+    const bull=sl[i].price>=sl[i-1].price,nxt=i+1<sl.length?sl[i+1].price>=sl[i].price:bull
+    if(nxt!==bull||i===sl.length-1){
+      ctx.beginPath();ctx.strokeStyle=bull?'rgba(0,230,118,.75)':'rgba(255,23,68,.75)';ctx.lineWidth=1.5;ctx.lineJoin='round'
+      for(let j=seg;j<=i;j++) j===seg?ctx.moveTo(px(j),py(sl[j].price)):ctx.lineTo(px(j),py(sl[j].price))
+      ctx.stroke();seg=i
+    }
+  }
+  sl.forEach((t,i)=>{
+    if(!t.isSpike)return
+    const x=px(i),y=py(t.price),boom=inst.type==='boom'
+    ctx.strokeStyle='#fff176';ctx.lineWidth=2
+    ctx.beginPath();ctx.moveTo(x,boom?y+18:y-18);ctx.lineTo(x,boom?y-4:y+4);ctx.stroke()
+    ctx.beginPath();ctx.arc(x,y,4,0,Math.PI*2);ctx.fillStyle='#fff176';ctx.fill()
+    ctx.fillStyle='#fff176';ctx.font='10px JetBrains Mono';ctx.fillText('⚡',x-5,boom?y+30:y-8)
+  })
+  const last=sl[sl.length-1],lx=px(sl.length-1),ly=py(last.price)
+  ctx.setLineDash([4,5]);ctx.strokeStyle=inst.color+'40';ctx.lineWidth=1
+  ctx.beginPath();ctx.moveTo(10,ly);ctx.lineTo(W-10,ly);ctx.stroke();ctx.setLineDash([])
+  ctx.beginPath();ctx.arc(lx,ly,5,0,Math.PI*2);ctx.fillStyle=inst.color;ctx.fill()
+  ctx.strokeStyle=inst.color+'60';ctx.lineWidth=1.5;ctx.stroke()
+}
+
+/* ════════════════════════════════
+   FULL RENDER (on boot and inst switch)
+════════════════════════════════ */
+function renderAll(){
+  const sig=sigs[cur]; if(!sig) return
+  const inst=INST[cur], dc=sig.dc
+
+  // Hero theming
+  document.getElementById('hero').style.borderColor=dc+'40'
+  const dEl=document.getElementById('sig-dir')
+  dEl.textContent=sig.dir; dEl.style.color=dc
+  document.getElementById('sig-score').textContent=(sig.score>0?'+':'')+sig.score
+  document.getElementById('sig-score').style.color=dc
+  document.getElementById('sig-conf').textContent=sig.conf+'%'
+  document.getElementById('sig-conf').style.color=dc
+  document.getElementById('sig-price').textContent=livePrice[cur]!==null?livePrice[cur].toFixed(5):sig.c.toFixed(5)
+  document.getElementById('chart-sub').textContent=inst.name+' · ATR '+sig.at+' · Z '+sig.pred.zScore
+
+  // Levels
+  document.getElementById('lvl-grid').innerHTML=[
+    {l:'STOP LOSS',v:sig.sl,c:'#ff1744'},
+    {l:'TP 1',v:sig.tp1,c:'#00e676'},
+    {l:'TP 2',v:sig.tp2,c:'#00e676'},
+    {l:'TP 3',v:sig.tp3,c:'#00fff7'},
+  ].map(lv=>`<div class="lvl-box" style="border-color:${lv.c}20"><div class="lvl-lbl">${lv.l}</div><div class="lvl-val" style="color:${lv.c}">${lv.v}</div></div>`).join('')
+
+  // Instrument card
+  document.getElementById('inst-card').innerHTML=`
+    <div class="clbl" style="margin-bottom:9px">${inst.name.toUpperCase()}</div>
+    <div style="font-family:'Orbitron',monospace;font-size:18px;font-weight:700;color:${inst.color};margin-bottom:7px">${inst.name}</div>
+    <div style="font-size:9px;color:var(--txt);line-height:1.8;margin-bottom:8px">${inst.desc}</div>
+    ${[
+      ['Spike direction', inst.type==='boom'?'▲ Upward':'▼ Downward', inst.color],
+      ['Avg interval',    '~'+inst.avg+' ticks', 'var(--txt)'],
+      ['Best entry',      inst.type==='boom'?'Post-spike pullback':'Post-spike bounce', 'var(--warn)'],
+      ['R:R',             '1:'+sig.rr, '#00fff7'],
+    ].map(r=>`<div class="irow"><span style="font-size:8px;color:var(--muted)">${r[0]}</span><span style="font-size:9px;color:${r[2]};font-weight:700">${r[1]}</span></div>`).join('')}`
+
+  // Signal history
+  hist.unshift({dir:sig.dir,sym:inst.name,t:new Date().toLocaleTimeString(),c:dc})
+  hist=hist.slice(0,20)
+  document.getElementById('sig-hist').innerHTML=hist.length
+    ?hist.map((h,i)=>`<div class="hrow" style="opacity:${1-i*.06}"><span style="color:${h.c};font-weight:700">${h.dir}</span><span style="color:var(--muted);font-size:8px">${h.sym}</span><span style="color:var(--muted);font-size:8px">${h.t}</span></div>`).join('')
+    :'<div style="font-size:9px;color:var(--muted);padding:8px;text-align:center">No history yet</div>'
+
+  // Panels
+  renderStructure(sig); renderSpike(sig); renderEntry(sig); renderMomentum(sig); renderConf(sig)
+  // Live elements
+  updateLive()
+  drawChart()
+}
+
+/* ════════════════════════════════
+   PANEL RENDERERS
+════════════════════════════════ */
+function renderStructure(sig){
+  const ms=sig.ms, tc=ms.trend==='BULLISH'?'#00e676':ms.trend==='BEARISH'?'#ff1744':'var(--muted)'
+  const b=(t,c)=>`<span class="badge" style="color:${c};background:${c}18">${t}</span>`
+  document.getElementById('p-structure').innerHTML=`
+    <div class="clbl" style="margin-bottom:10px">MARKET STRUCTURE</div>
+    <div style="margin-bottom:12px">
+      <div style="font-size:7px;color:var(--muted);margin-bottom:4px">TREND</div>
+      <div style="font-family:'Orbitron',monospace;font-size:26px;font-weight:900;color:${tc}">${ms.trend}</div>
+      <div style="margin-top:6px">${ms.HH?b('HH','#00e676'):''}${ms.HL?b('HL','#00e676'):''}${ms.LH?b('LH','#ff1744'):''}${ms.LL?b('LL','#ff1744'):''}${ms.bos?b('BOS','#ffab00'):''}</div>
+    </div>
+    ${[{l:'EMA 20',v:sig.e20},{l:'EMA 50',v:sig.e50}].map(e=>{const ec=sig.c>e.v?'#00e676':'#ff1744';return`<div class="srow"><span style="font-size:8px;color:var(--muted);width:48px">${e.l}</span><span style="font-size:9px;color:var(--txt);flex:1">${e.v}</span><span style="font-size:8px;color:${ec}">${sig.c>e.v?'▲ Above':'▼ Below'}</span></div>`}).join('')}`
+}
+
+function renderSpike(sig){
+  const pred=sig.pred, log=spLog[cur], inst=INST[cur]
+  document.getElementById('p-spike').innerHTML=`
+    <div class="clbl" style="margin-bottom:10px">SPIKE PREDICTOR ENGINE</div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-bottom:11px">
+      ${[
+        {l:'GEO',v:pred.geo+'%',c:pred.geo>=75?'#fff176':'var(--muted)'},
+        {l:'VOL',v:pred.volScore+'%',c:pred.compressed?'#00fff7':'var(--muted)'},
+        {l:'DRIFT',v:pred.driftScore+'%',c:pred.driftScore>=60?'#ffab00':'var(--muted)'},
+        {l:'MEAN',v:pred.meanScore+'%',c:pred.meanScore>=40?'#ff6b35':'var(--muted)'},
+        {l:'EXHST',v:pred.exhaustScore+'%',c:pred.exhaustScore>=50?'#ff2d6b':'var(--muted)'},
+      ].map(m=>`<div style="background:var(--bg3);border-radius:4px;padding:7px;text-align:center"><div style="font-size:7px;color:var(--muted);margin-bottom:2px">${m.l}</div><div style="font-family:'Orbitron',monospace;font-size:15px;font-weight:700;color:${m.c}">${m.v}</div></div>`).join('')}
+    </div>
+    <div style="background:var(--bg3);border-radius:4px;padding:12px;margin-bottom:11px;border:1px solid ${pred.zc}30">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div style="font-size:7px;color:var(--muted);margin-bottom:2px">COMPOSITE (SIGNAL-TIME)</div>
+        <div style="font-family:'Orbitron',monospace;font-size:38px;font-weight:700;color:${pred.zc}">${pred.composite}%</div></div>
+        <div style="text-align:right">
+          <div style="font-family:'Orbitron',monospace;font-size:13px;color:${pred.zc};font-weight:700">${pred.zone}</div>
+          <div style="font-size:8px;color:var(--muted);margin-top:3px">Snap ticks: ${snapshotSince[cur]} / ${inst.avg}</div>
+          <div style="font-size:8px;color:var(--muted)">Z: ${pred.zScore}</div>
+        </div>
+      </div>
+      <div style="height:4px;background:var(--muted);border-radius:2px;margin-top:9px;overflow:hidden"><div style="height:100%;width:${pred.composite}%;background:${pred.zc};border-radius:2px"></div></div>
+    </div>
+    ${[['EARLY','0–35%','#1a3050','Baseline'],['BUILDING','35–55%','#00fff7','Accumulating'],['WARM','55–70%','#ffab00','Confirming'],['HOT','70–80%','#fff176','High probability'],['🔥 FIRE','80–99%','#ff4500','Spike imminent']].map(z=>`<div class="zrow" style="border-color:${z[2]};opacity:${pred.zone===z[0]?1:.3}"><div style="flex:1"><div style="font-size:9px;color:${z[2]};font-weight:700">${z[0]} (${z[1]})</div><div style="font-size:8px;color:var(--muted)">${z[3]}</div></div>${pred.zone===z[0]?`<span style="font-size:8px;color:${z[2]};background:${z[2]}18;padding:1px 7px;border-radius:2px">NOW</span>`:''}</div>`).join('')}
+    <div style="font-size:8px;color:var(--muted);margin:10px 0 6px">RECENT SPIKES</div>
+    ${log.slice(0,5).map((s,i)=>`<div class="sentry" style="opacity:${1-i*.15}"><span style="font-size:9px;color:var(--spike)">⚡ ${s.dir}</span><span style="font-size:9px;color:var(--txt)">${s.price}</span><span style="font-size:8px;color:var(--muted)">${s.t}</span></div>`).join('')||'<div style="font-size:9px;color:var(--muted);padding:8px;text-align:center">No spikes yet</div>'}`
+}
+
+function renderEntry(sig){
+  const inst=INST[cur],ps=sig.ps,isBoom=inst.type==='boom'
+  const qc=ps?({PRIME:'#00e676',GOOD:'#00fff7',FAIR:'#ffab00',STALE:'#444'}[ps.q]||'#444'):'#444'
+  document.getElementById('p-entry').innerHTML=`
+    <div class="clbl" style="margin-bottom:10px">POST-SPIKE ENTRY</div>
+    <div style="background:var(--bg3);border-radius:4px;padding:12px;margin-bottom:12px;border:1px solid ${qc}20">
+      <div style="font-size:7px;color:var(--muted);margin-bottom:3px">SETUP QUALITY</div>
+      <div style="font-family:'Orbitron',monospace;font-size:30px;font-weight:700;color:${qc}">${ps?ps.q:'NO SPIKE YET'}</div>
+      ${ps?`<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:9px">
+        <div style="text-align:center"><div style="font-size:7px;color:var(--muted)">TICKS AGO</div><div style="font-family:'Orbitron',monospace;font-size:18px;color:var(--txt)">${ps.ago}</div></div>
+        <div style="text-align:center"><div style="font-size:7px;color:var(--muted)">SPIKE PRICE</div><div style="font-family:'Orbitron',monospace;font-size:11px;color:var(--txt)">${ps.sp}</div></div>
+        <div style="text-align:center"><div style="font-size:7px;color:var(--muted)">RETRACE</div><div style="font-family:'Orbitron',monospace;font-size:16px;color:${ps.ret>0?'#00e676':'#ff1744'}">${ps.ret>0?'+':''}${ps.ret}%</div></div>
+      </div>`:'<div style="font-size:9px;color:var(--muted);margin-top:5px">Wait for a spike, then look for entry.</div>'}
+    </div>
+    ${isBoom?`<div class="estep" style="border-color:#00fff7"><b style="color:#00fff7">⚡ BOOM PLAYBOOK</b><br>1. Alert fires → spike loads up<br>2. Spike fires UP — wait 3–10 tick pullback<br>3. Enter LONG on higher low<br>4. SL below pullback low · TP prev spike high</div>`
+    :`<div class="estep" style="border-color:#ff2d6b"><b style="color:#ff2d6b">⚡ CRASH PLAYBOOK</b><br>1. Alert fires → spike loads down<br>2. Spike fires DOWN — wait 3–15 tick bounce<br>3. Enter SHORT when bounce exhausts<br>4. SL above bounce high · TP prev spike low</div>`}`
+}
+
+function renderMomentum(sig){
+  const mom=sig.mom,pred=sig.pred
+  document.getElementById('p-momentum').innerHTML=`
+    <div class="clbl" style="margin-bottom:10px">MOMENTUM & VOLATILITY</div>
+    <div class="mgbox">
+      ${[
+        {l:'ROC 50',v:`${mom.roc>0?'+':''}${mom.roc}%`,c:mom.roc>0?'#00e676':'#ff1744'},
+        {l:'ACCEL',v:`${mom.accel>0?'+':''}${mom.accel}%`,c:mom.accel>0?'#00e676':'#ff1744'},
+        {l:'Z-SCORE',v:pred.zScore,c:Math.abs(pred.zScore)>1.5?'#ffab00':'#00fff7'},
+        {l:'ATR SHORT',v:pred.atrShort.toFixed(4),c:'var(--txt)'},
+        {l:'ATR LONG',v:pred.atrLong.toFixed(4),c:'var(--txt)'},
+        {l:'VOL RATIO',v:(pred.atrLong>0?(pred.atrShort/pred.atrLong).toFixed(2):'—'),c:pred.compressed?'#fff176':'var(--muted)'},
+      ].map(m=>`<div class="mbox"><div class="mlbl">${m.l}</div><div class="mval" style="color:${m.c}">${m.v}</div></div>`).join('')}
+    </div>
+    ${[
+      {l:'Vol compressed',a:pred.compressed,d:'ATR squeeze — pre-spike condition',c:'#fff176'},
+      {l:'Positive momentum',a:mom.roc>0,d:'Price up vs 50 ticks ago',c:'#00e676'},
+      {l:'Negative momentum',a:mom.roc<0,d:'Price down vs 50 ticks ago',c:'#ff1744'},
+      {l:'Overextended',a:mom.overext,d:`EMA dev ${mom.dev}% — reversal risk`,c:'#ffab00'},
+    ].map(f=>`<div style="display:flex;align-items:center;gap:8px;padding:6px 9px;background:var(--bg3);border-radius:3px;margin-bottom:3px;opacity:${f.a?1:.3}"><div style="width:5px;height:5px;border-radius:50%;background:${f.a?f.c:'var(--muted)'}"></div><div><div style="font-size:9px;color:${f.a?f.c:'var(--muted)'};font-weight:${f.a?700:400}">${f.l}</div><div style="font-size:8px;color:var(--muted)">${f.d}</div></div></div>`).join('')}`
+}
+
+function renderConf(sig){
+  const active=sig.confs.filter(c=>c.b!==null),neutral=sig.confs.filter(c=>c.b===null)
+  document.getElementById('p-conf').innerHTML=`
+    <div class="clbl" style="margin-bottom:10px">CONFLUENCES · Score ${sig.score>0?'+':''}${sig.score} · ${sig.conf}%</div>
+    ${active.map(c=>`<div class="citem" style="border-color:${c.b?'#00e676':'#ff1744'}"><span style="font-size:9px;color:var(--txt);flex:1">${c.t}</span><span style="font-size:11px;color:${c.b?'#00e676':'#ff1744'}">${c.b?'▲':'▼'}</span></div>`).join('')}
+    ${neutral.map(c=>`<div class="citem" style="border-color:#ffab00"><span style="font-size:9px;color:var(--txt);flex:1">${c.t}</span><span style="font-size:11px;color:#ffab00">◈</span></div>`).join('')}
+    ${!sig.confs.length?'<div style="font-size:9px;color:var(--muted)">Building…</div>':''}`
+}
+
+/* ════════════════════════════════
+   AI BRIEF
+════════════════════════════════ */
+async function getAI(){
+  const sig=sigs[cur],inst=INST[cur]; if(!sig)return
+  const btn=document.getElementById('ai-btn')
+  btn.textContent='⟳ Analysing…'; btn.disabled=true
+  document.getElementById('ai-out').innerHTML=`<div style="display:flex;align-items:center;gap:9px;color:var(--boom);font-size:9px;padding:10px"><div class="lring spin" style="width:13px;height:13px;border-width:2px"></div>Generating…</div>`
+  const pred=sig.pred
+  const prompt=`Expert Deriv Boom & Crash trader. Write 4-sentence trade brief.
+INSTRUMENT: ${inst.name} — ${inst.desc}
+SIGNAL: ${sig.dir} | Score ${sig.score} | Conf ${sig.conf}%
+SPIKE PREDICTOR: Composite ${pred.composite}% (${pred.zone}) | Geo ${pred.geo}% | Vol compressed: ${pred.compressed} | Drift ${pred.driftScore}% | Z ${pred.zScore}
+TICKS SINCE SPIKE (snapshot): ${snapshotSince[cur]} / avg ${inst.avg}
+POST-SPIKE: ${sig.ps?sig.ps.q+' — '+sig.ps.ago+' ticks':' No recent spike'}
+STRUCTURE: ${sig.ms.trend} | BOS: ${sig.ms.bos}
+LEVELS: Entry ${sig.c} | SL ${sig.sl} | TP1 ${sig.tp1} | TP2 ${sig.tp2} | R:R 1:${sig.rr}
+Sentences: (1) spike prob + which layers confirm, (2) pre-spike signal logic, (3) exact entry + levels, (4) invalidation + risk.`
+  try{
+    const res=await fetch('/.netlify/functions/brief',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:prompt}]})})
+    const data=await res.json()
+    document.getElementById('ai-out').innerHTML=data.error
+      ?`<div style="color:var(--crash);font-size:9px;padding:10px">Error: ${data.error}</div>`
+      :`<div class="ai-txt">${data.text}</div>`
+  }catch(e){document.getElementById('ai-out').innerHTML=`<div style="color:var(--crash);font-size:9px;padding:10px">Failed: ${e.message}</div>`}
+  btn.textContent='⚡ GENERATE'; btn.disabled=false
+}
+
+/* ════════════════════════════════
+   TAB SWITCHING
+════════════════════════════════ */
+function ptab(name,btn){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on')); btn.classList.add('on')
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'))
+  document.getElementById('p-'+name)?.classList.add('on')
+}
+function switchInst(key,btn){
+  cur=key
+  document.querySelectorAll('.itab').forEach(t=>t.classList.remove('on','boom','crash'))
+  btn.classList.add('on',INST[key].type)
+  if(snapshotData[key].length>10) renderAll()
+}
+
+/* ════════════════════════════════
+   BOOT + POLL
+════════════════════════════════ */
+boot()
+setInterval(pollAll, 2000)
+if(window.ResizeObserver){
+  const ro=new ResizeObserver(()=>{if(sigs[cur])drawChart()})
+  const cc=document.getElementById('chart')?.parentElement; if(cc)ro.observe(cc)
+}
+window.addEventListener('resize',()=>{if(sigs[cur])drawChart()})
+</script>
+</body>
+</html>
